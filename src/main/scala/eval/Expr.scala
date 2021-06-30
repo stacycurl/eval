@@ -2,6 +2,8 @@ package eval
 
 import scala.language.higherKinds
 
+import eval.Expr.Definition
+
 import scala.collection.immutable.{Map => SMap}
 
 
@@ -23,7 +25,7 @@ object Expr {
   implicit class ExprFnSyntax[A, B](private val self: Expr[A => B]) extends AnyVal {
     def andThen[C](f: Expr[B => C]): Expr[A => C] = AndThen(self, f)
     
-    def lift[F[_]: FName]: Expr[F[A] => F[B]] = Lift[F, A, B](self, liftFExpr[F])
+    def lift[F[_]: FName]: Expr[F[A] => F[B]] = Lift[Function, F, A, B](self, liftFExpr[Function, F])
   }
 
   case class Literal[A](value: A) extends Expr[A] {
@@ -48,16 +50,17 @@ object Expr {
     def apply[A, B](fa: F[A, B]): G[A, B]
   }
   
-  type LiftFunction[F[_]] = Function ~~> Lambda[(A, B) => F[A] => F[B]]
-
-  def liftFExpr[F[_]: FName]: Expr[LiftFunction[F]] = Named[LiftFunction[F]](s"lift-${FName.name[F]}")
+  type Definition[A] = (Expr[A], A)
   
-  case class Lift[F[_], A, B](
-    value: Expr[A => B], 
-    dunno: Expr[LiftFunction[F]]
+  def liftFExpr[Fn[_, _], F[_]: FName]: Expr[Fn ~~> Lambda[(A, B) => F[A] => F[B]]] = 
+    Named[Fn ~~> Lambda[(A, B) => F[A] => F[B]]](s"lift-${FName.name[F]}")
+  
+  case class Lift[Fn[_, _], F[_], A, B](
+    fnExpr: Expr[Fn[A, B]], 
+    liftExpr: Expr[Fn ~~> Lambda[(A, B) => F[A] => F[B]]]
   ) extends Expr[F[A] => F[B]] {
     def interpret(interpreter: Interpreter): Expr[F[A] => F[B]] = {
-      (value.interpret(interpreter), dunno.interpret(interpreter)) match {
+      (fnExpr.interpret(interpreter), liftExpr.interpret(interpreter)) match {
         case (Literal(ab), Literal(lift)) => Literal(lift(ab))
         case _ => this
       }
@@ -77,23 +80,23 @@ trait Interpreter {
 }
 
 object Interpreter {
-  case class Real(lookup: Lookup) extends Interpreter {
-    def lookup[A](expr: Expr[A]): Expr[A] = lookup.lookup(expr)
+  case class Real(definitions: Definitions) extends Interpreter {
+    def lookup[A](expr: Expr[A]): Expr[A] = definitions.lookup(expr)
   }
   
-  object Lookup {
-    val empty: Lookup = new Lookup(SMap.empty)
+  object Definitions {
+    val empty: Definitions = new Definitions(SMap.empty)
     
-    def apply(fns: (Expr[_], _)*): Lookup = new Lookup(fns.toMap)
+    def apply(fns: (Expr[_], _)*): Definitions = new Definitions(fns.toMap)
   }
   
-  case class Lookup(lookup: SMap[Expr[_], _]) {
-    def lookup[A](expr: Expr[A]): Expr[A] = lookup.get(expr) match {
+  case class Definitions(definitions: SMap[Expr[_], _]) {
+    def lookup[A](expr: Expr[A]): Expr[A] = definitions.get(expr) match {
       case Some(value) => Expr.Literal(value.asInstanceOf[A])
       case None        => expr
     }
   
-    def :+[A, B](pair: (Expr[A], A)): Lookup = copy(lookup + pair)
+    def :+[A, B](definition: Definition[A]): Definitions = copy(definitions + definition)
   }
 }
 

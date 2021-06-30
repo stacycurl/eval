@@ -19,19 +19,19 @@ class ExprSpec extends FreeSpec with Matchers {
     val upperCase = Named[String => String]("upper-case")
     val lowerCase = Named[String => String]("lower-case")
     
-    def functorExpr[F[_]: Functor: FName]: (Expr[LiftFunction[F]], LiftFunction[F]) = {
-      Expr.liftFExpr[F] -> new Expr.LiftFunction[F] {
+    def functorDefinition[F[_]: Functor: FName]: Definition[Function ~~> Lambda[(A, B) => F[A] => F[B]]] = {
+      Expr.liftFExpr[Function, F] -> new (Function ~~> Lambda[(A, B) => F[A] => F[B]]) {
         def apply[A, B](fa: A => B): F[A] => F[B] = Functor[F].lift(fa)
       }
     }
     
     val interpreter = Interpreter.Real(
-      Lookup(
+      Definitions(
         greeting   -> "Ola !", 
         reverse    -> (_.reverse),
         upperCase  -> (_.toUpperCase),
-        functorExpr[Option],
-        functorExpr[List],
+        functorDefinition[Option],
+        functorDefinition[List],
 //        Expr.liftFExpr[List] -> new Expr.LiftFunction[List] {
 //          def apply[A, B](fa: A => B): List[A] => List[B] = _.map(fa)
 //        },
